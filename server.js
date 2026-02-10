@@ -362,26 +362,43 @@ app.post('/webhook', async (req, res) => {
   
   
 
+  let data;
   try {
-    const data = JSON.parse(payload);
-    
-    // Валидация наличия данных
+    console.log('🔍 Начинаем парсинг JSON...');
+    data = JSON.parse(payload);
+    console.log('✅ JSON успешно распарсен');
+  } catch (parseError) {
+    console.error('❌ Ошибка парсинга JSON:', parseError.message);
+    console.error('Первые 500 символов payload:', payload?.substring(0, 500));
+    return res.status(400).json({
+      success: false,
+      error: 'Ошибка парсинга JSON',
+      message: parseError.message
+    });
+  }
+  
+  // Валидация наличия данных
+  console.log('🔍 Проверка наличия данных...');
     if (!data || Object.keys(data).length === 0) {
+      console.error('❌ Данные не предоставлены или пусты');
       return res.status(400).json({
         success: false,
         error: 'Данные не предоставлены. Отправьте JSON в теле запроса'
       });
     }
+    console.log('✅ Данные присутствуют, ключи:', Object.keys(data).join(', '));
     
     // Валидация обязательных полей
+    console.log('🔍 Проверка обязательных полей (contact, call)...');
     if (!data.contact || !data.call) {
-      console.warn('⚠️ Отсутствуют обязательные поля: contact или call');
+      console.error('❌ Отсутствуют обязательные поля: contact или call');
+      console.error('   contact:', data.contact ? '✅ присутствует' : '❌ отсутствует');
+      console.error('   call:', data.call ? '✅ присутствует' : '❌ отсутствует');
       return res.status(400).json({
         success: false,
         error: 'Отсутствуют обязательные поля: contact или call'
       });
     }
-    
     console.log('✅ Обязательные поля присутствуют');
     console.log('📋 Начинаем создание/обновление контакта в amoCRM');
     
@@ -433,6 +450,12 @@ app.post('/webhook', async (req, res) => {
     console.error('Тип ошибки:', error.constructor.name);
     console.error('Сообщение:', error.message);
     console.error('Stack:', error.stack);
+    
+    // Если ошибка при парсинге JSON
+    if (error instanceof SyntaxError) {
+      console.error('❌ Ошибка парсинга JSON:', error.message);
+      console.error('Попытка распарсить:', payload?.substring(0, 200));
+    }
     
     // Логируем детали ошибки от amoCRM, если есть
     if (error.response) {
