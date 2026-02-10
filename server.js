@@ -157,16 +157,45 @@ async function createOrUpdateContactInAmoCRM(data) {
       data: response.data
     };
   } catch (error) {
-    console.error('Ошибка при создании/обновлении контакта в amoCRM:');
+    console.error('❌ Ошибка при создании/обновлении контакта в amoCRM:');
     console.error('URL:', `${baseUrl}/api/v4/contacts`);
     console.error('Ошибка:', error.message);
-    console.error('Детали:', error.response?.data || error.response?.statusText || 'Нет деталей');
+    console.error('Код ошибки:', error.code);
+    
+    if (error.response) {
+      console.error('Статус ответа:', error.response.status);
+      console.error('Данные ответа:', JSON.stringify(error.response.data, null, 2));
+      console.error('Заголовки ответа:', JSON.stringify(error.response.headers, null, 2));
+    } else if (error.request) {
+      console.error('Запрос был отправлен, но ответ не получен');
+      console.error('Детали запроса:', error.request);
+    } else {
+      console.error('Детали ошибки:', error.message);
+    }
     
     if (error.message.includes('Invalid URL') || error.code === 'ERR_INVALID_URL') {
       throw new Error(`Ошибка при отправке вебхука: Invalid URL - проверьте AMOCRM_SUBDOMAIN в .env`);
     }
     
-    throw new Error(`Ошибка при создании/обновлении контакта в amoCRM: ${error.response?.data?.error || error.response?.data?.detail || error.message}`);
+    // Формируем понятное сообщение об ошибке
+    let errorMessage = 'Ошибка при создании/обновлении контакта в amoCRM';
+    if (error.response?.data) {
+      if (error.response.data.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.response.data.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error.response.data.title) {
+        errorMessage = error.response.data.title;
+      } else if (typeof error.response.data === 'string') {
+        errorMessage = error.response.data;
+      } else {
+        errorMessage = `Ошибка API: ${JSON.stringify(error.response.data)}`;
+      }
+    } else {
+      errorMessage = error.message;
+    }
+    
+    throw new Error(errorMessage);
   }
 }
 
@@ -266,16 +295,45 @@ async function createLeadInAmoCRM(data, contactId) {
       data: response.data
     };
   } catch (error) {
-    console.error('Ошибка при создании сделки в amoCRM:');
+    console.error('❌ Ошибка при создании сделки в amoCRM:');
     console.error('URL:', `${baseUrl}/api/v4/leads`);
     console.error('Ошибка:', error.message);
-    console.error('Детали:', error.response?.data || error.response?.statusText || 'Нет деталей');
+    console.error('Код ошибки:', error.code);
+    
+    if (error.response) {
+      console.error('Статус ответа:', error.response.status);
+      console.error('Данные ответа:', JSON.stringify(error.response.data, null, 2));
+      console.error('Заголовки ответа:', JSON.stringify(error.response.headers, null, 2));
+    } else if (error.request) {
+      console.error('Запрос был отправлен, но ответ не получен');
+      console.error('Детали запроса:', error.request);
+    } else {
+      console.error('Детали ошибки:', error.message);
+    }
     
     if (error.message.includes('Invalid URL') || error.code === 'ERR_INVALID_URL') {
       throw new Error(`Ошибка при отправке вебхука: Invalid URL - проверьте AMOCRM_SUBDOMAIN в .env`);
     }
     
-    throw new Error(`Ошибка при создании сделки в amoCRM: ${error.response?.data?.error || error.response?.data?.detail || error.message}`);
+    // Формируем понятное сообщение об ошибке
+    let errorMessage = 'Ошибка при создании сделки в amoCRM';
+    if (error.response?.data) {
+      if (error.response.data.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.response.data.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error.response.data.title) {
+        errorMessage = error.response.data.title;
+      } else if (typeof error.response.data === 'string') {
+        errorMessage = error.response.data;
+      } else {
+        errorMessage = `Ошибка API: ${JSON.stringify(error.response.data)}`;
+      }
+    } else {
+      errorMessage = error.message;
+    }
+    
+    throw new Error(errorMessage);
   }
 }
 
@@ -283,6 +341,8 @@ async function createLeadInAmoCRM(data, contactId) {
  * Обработчик вебхука от Sasha AI
  */
 app.post('/webhook', async (req, res) => {
+  console.log('📥 Получен вебхук от Sasha AI');
+  
   const signature = req.headers['x-webhook-signature'];
   const payload = req.body; // Теперь это строка благодаря express.text()
   const secret = process.env.WEBHOOK_SECRET;
@@ -315,33 +375,41 @@ app.post('/webhook', async (req, res) => {
     
     // Валидация обязательных полей
     if (!data.contact || !data.call) {
+      console.warn('⚠️ Отсутствуют обязательные поля: contact или call');
       return res.status(400).json({
         success: false,
         error: 'Отсутствуют обязательные поля: contact или call'
       });
     }
     
+    console.log('✅ Обязательные поля присутствуют');
+    console.log('📋 Начинаем создание/обновление контакта в amoCRM');
+    
     // Создание/обновление контакта в amoCRM
     let contactId = null;
     try {
       const contactResult = await createOrUpdateContactInAmoCRM(data);
       contactId = contactResult.contactId;
-      console.log(`Контакт создан/обновлен в amoCRM: ${contactId}`);
+      console.log(`✅ Контакт создан/обновлен в amoCRM: ${contactId}`);
     } catch (error) {
-      console.warn('Не удалось создать/обновить контакт:', error.message);
-      // Если ошибка связана с URL, прерываем выполнение
-      if (error.message.includes('Invalid URL')) {
+      console.error('❌ Не удалось создать/обновить контакт:', error.message);
+      // Если ошибка связана с URL или обязательными полями, прерываем выполнение
+      if (error.message.includes('Invalid URL') || error.message.includes('не установлен')) {
         return res.status(400).json({
           success: false,
           message: error.message
         });
       }
       // Продолжаем создание сделки даже если контакт не создан
+      console.warn('⚠️ Продолжаем создание сделки без контакта');
     }
+    
+    console.log('📋 Начинаем создание сделки в amoCRM');
     
     // Создание сделки в amoCRM
     try {
       const result = await createLeadInAmoCRM(data, contactId);
+      console.log(`✅ Сделка успешно создана в amoCRM: ${result.leadId}`);
       
       res.json({
         success: true,
@@ -361,7 +429,7 @@ app.post('/webhook', async (req, res) => {
       throw error; // Пробрасываем другие ошибки дальше
     }
   } catch (error) {
-    console.error('Ошибка при обработке запроса:');
+    console.error('❌❌❌ КРИТИЧЕСКАЯ ОШИБКА при обработке запроса:');
     console.error('Тип ошибки:', error.constructor.name);
     console.error('Сообщение:', error.message);
     console.error('Stack:', error.stack);
@@ -370,8 +438,17 @@ app.post('/webhook', async (req, res) => {
     if (error.response) {
       console.error('Статус ответа:', error.response.status);
       console.error('Данные ответа:', JSON.stringify(error.response.data, null, 2));
-      console.error('Заголовки ответа:', error.response.headers);
+      console.error('Заголовки ответа:', JSON.stringify(error.response.headers, null, 2));
+    } else if (error.request) {
+      console.error('Запрос был отправлен, но ответ не получен');
+      console.error('Детали запроса:', error.request);
     }
+    
+    // Логируем переменные окружения (без секретов)
+    console.error('Проверка переменных окружения:');
+    console.error('AMOCRM_SUBDOMAIN:', process.env.AMOCRM_SUBDOMAIN ? '✅ установлен' : '❌ не установлен');
+    console.error('AMOCRM_ACCESS_TOKEN:', process.env.AMOCRM_ACCESS_TOKEN ? '✅ установлен' : '❌ не установлен');
+    console.error('AMOCRM_PIPELINE_ID:', process.env.AMOCRM_PIPELINE_ID ? `✅ установлен (${process.env.AMOCRM_PIPELINE_ID})` : '❌ не установлен');
     
     // Определяем статус код на основе типа ошибки
     let statusCode = 500;
