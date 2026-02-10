@@ -1,0 +1,40 @@
+# Зависимости
+node_modules
+npm-debug.log
+package-lock.json
+yarn.lock
+
+# Переменные окружения (не копируем в образ)
+.env
+.env.local
+.env.*.local
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Документация
+README.md
+MAPPING_GUIDE.md
+mapping.example.js
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+logs/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore

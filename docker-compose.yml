@@ -1,0 +1,25 @@
+services:
+  webhook-server:
+    build: .
+    container_name: sasha-webhook-amocrm
+    ports:
+      # Маппинг портов: внешний_порт:внутренний_порт
+      # PORT - порт на хосте (внешний доступ)
+      # CONTAINER_PORT - порт внутри контейнера
+      - "${PORT:-3333}:${CONTAINER_PORT:-3333}"
+    environment:
+      # Передаем CONTAINER_PORT в контейнер для использования внутри
+      - CONTAINER_PORT=${CONTAINER_PORT:-3333}
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      # Монтируем код для разработки (можно закомментировать для продакшена)
+      - ./server.js:/app/server.js:ro
+      - ./mapping.js:/app/mapping.js:ro
+    networks:
+      - webhook-network
+
+networks:
+  webhook-network:
+    driver: bridge

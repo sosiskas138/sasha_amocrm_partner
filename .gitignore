@@ -1,0 +1,22 @@
+# Зависимости
+node_modules/
+package-lock.json
+yarn.lock
+
+# Переменные окружения
+.env
+
+# Логи
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
