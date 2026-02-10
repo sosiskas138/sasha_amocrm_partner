@@ -63,10 +63,31 @@ function verifyWebhookSignature(payload, signature, secret) {
  */
 function getAmoCRMBaseUrl() {
   const subdomain = process.env.AMOCRM_SUBDOMAIN;
-  if (!subdomain) {
-    throw new Error('AMOCRM_SUBDOMAIN не установлен в переменных окружения');
+  
+  if (!subdomain || subdomain.trim() === '') {
+    throw new Error('Ошибка при отправке вебхука: Invalid URL - AMOCRM_SUBDOMAIN не установлен в переменных окружения. Проверьте файл .env');
   }
-  return `https://${subdomain}.amocrm.ru`;
+  
+  // Очищаем subdomain от лишних символов (пробелы, слэши и т.д.)
+  const cleanSubdomain = subdomain.trim().replace(/[^a-zA-Z0-9-]/g, '');
+  
+  if (!cleanSubdomain || cleanSubdomain.length === 0) {
+    throw new Error('Ошибка при отправке вебхука: Invalid URL - AMOCRM_SUBDOMAIN содержит недопустимые символы или пустой. Укажите поддомен вашего аккаунта amoCRM (например: mycompany для mycompany.amocrm.ru)');
+  }
+  
+  const baseUrl = `https://${cleanSubdomain}.amocrm.ru`;
+  
+  // Валидация URL
+  try {
+    const url = new URL(baseUrl);
+    if (!url.hostname || !url.hostname.includes('amocrm.ru')) {
+      throw new Error('Некорректный домен');
+    }
+  } catch (error) {
+    throw new Error(`Ошибка при отправке вебхука: Invalid URL - некорректный формат URL для amoCRM: ${baseUrl}. Проверьте значение AMOCRM_SUBDOMAIN в файле .env`);
+  }
+  
+  return baseUrl;
 }
 
 /**
@@ -98,6 +119,16 @@ async function createOrUpdateContactInAmoCRM(data) {
   try {
     const url = `${baseUrl}/api/v4/contacts`;
     
+    // Валидация URL перед запросом
+    try {
+      new URL(url);
+    } catch (urlError) {
+      console.error('Некорректный URL:', url);
+      throw new Error(`Invalid URL: ${url}`);
+    }
+    
+    console.log(`Отправка запроса на создание контакта: ${url}`);
+    
     const response = await axios.post(
       url,
       contactData,
@@ -118,8 +149,16 @@ async function createOrUpdateContactInAmoCRM(data) {
       data: response.data
     };
   } catch (error) {
-    console.error('Ошибка при создании/обновлении контакта в amoCRM:', error.response?.data || error.message);
-    throw new Error(`Ошибка при создании/обновлении контакта в amoCRM: ${error.response?.data?.error || error.message}`);
+    console.error('Ошибка при создании/обновлении контакта в amoCRM:');
+    console.error('URL:', `${baseUrl}/api/v4/contacts`);
+    console.error('Ошибка:', error.message);
+    console.error('Детали:', error.response?.data || error.response?.statusText || 'Нет деталей');
+    
+    if (error.message.includes('Invalid URL') || error.code === 'ERR_INVALID_URL') {
+      throw new Error(`Ошибка при отправке вебхука: Invalid URL - проверьте AMOCRM_SUBDOMAIN в .env`);
+    }
+    
+    throw new Error(`Ошибка при создании/обновлении контакта в amoCRM: ${error.response?.data?.error || error.response?.data?.detail || error.message}`);
   }
 }
 
@@ -151,6 +190,16 @@ async function createLeadInAmoCRM(data, contactId) {
   try {
     const url = `${baseUrl}/api/v4/leads`;
     
+    // Валидация URL перед запросом
+    try {
+      new URL(url);
+    } catch (urlError) {
+      console.error('Некорректный URL:', url);
+      throw new Error(`Invalid URL: ${url}`);
+    }
+    
+    console.log(`Отправка запроса на создание сделки: ${url}`);
+    
     const response = await axios.post(
       url,
       leadData,
@@ -171,8 +220,16 @@ async function createLeadInAmoCRM(data, contactId) {
       data: response.data
     };
   } catch (error) {
-    console.error('Ошибка при создании сделки в amoCRM:', error.response?.data || error.message);
-    throw new Error(`Ошибка при создании сделки в amoCRM: ${error.response?.data?.error || error.message}`);
+    console.error('Ошибка при создании сделки в amoCRM:');
+    console.error('URL:', `${baseUrl}/api/v4/leads`);
+    console.error('Ошибка:', error.message);
+    console.error('Детали:', error.response?.data || error.response?.statusText || 'Нет деталей');
+    
+    if (error.message.includes('Invalid URL') || error.code === 'ERR_INVALID_URL') {
+      throw new Error(`Ошибка при отправке вебхука: Invalid URL - проверьте AMOCRM_SUBDOMAIN в .env`);
+    }
+    
+    throw new Error(`Ошибка при создании сделки в amoCRM: ${error.response?.data?.error || error.response?.data?.detail || error.message}`);
   }
 }
 
@@ -226,23 +283,51 @@ app.post('/webhook', async (req, res) => {
       console.log(`Контакт создан/обновлен в amoCRM: ${contactId}`);
     } catch (error) {
       console.warn('Не удалось создать/обновить контакт:', error.message);
+      // Если ошибка связана с URL, прерываем выполнение
+      if (error.message.includes('Invalid URL')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        });
+      }
       // Продолжаем создание сделки даже если контакт не создан
     }
     
     // Создание сделки в amoCRM
-    const result = await createLeadInAmoCRM(data, contactId);
-    
-    res.json({
-      success: true,
-      message: 'Сделка успешно создана в amoCRM',
-      leadId: result.leadId,
-      contactId: contactId,
-      data: result.data
-    });
+    try {
+      const result = await createLeadInAmoCRM(data, contactId);
+      
+      res.json({
+        success: true,
+        message: 'Сделка успешно создана в amoCRM',
+        leadId: result.leadId,
+        contactId: contactId,
+        data: result.data
+      });
+    } catch (error) {
+      // Если ошибка связана с URL, возвращаем понятное сообщение
+      if (error.message.includes('Invalid URL')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        });
+      }
+      throw error; // Пробрасываем другие ошибки дальше
+    }
   } catch (error) {
     console.error('Ошибка при обработке запроса:', error);
-    res.status(500).json({
+    
+    // Определяем статус код на основе типа ошибки
+    let statusCode = 500;
+    if (error.message.includes('Invalid URL')) {
+      statusCode = 400;
+    } else if (error.message.includes('не установлен')) {
+      statusCode = 500;
+    }
+    
+    res.status(statusCode).json({
       success: false,
+      message: error.message || 'Внутренняя ошибка сервера',
       error: error.message || 'Внутренняя ошибка сервера'
     });
   }
