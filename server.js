@@ -362,23 +362,24 @@ app.post('/webhook', async (req, res) => {
   
   
 
-  let data;
   try {
-    console.log('🔍 Начинаем парсинг JSON...');
-    data = JSON.parse(payload);
-    console.log('✅ JSON успешно распарсен');
-  } catch (parseError) {
-    console.error('❌ Ошибка парсинга JSON:', parseError.message);
-    console.error('Первые 500 символов payload:', payload?.substring(0, 500));
-    return res.status(400).json({
-      success: false,
-      error: 'Ошибка парсинга JSON',
-      message: parseError.message
-    });
-  }
-  
-  // Валидация наличия данных
-  console.log('🔍 Проверка наличия данных...');
+    let data;
+    try {
+      console.log('🔍 Начинаем парсинг JSON...');
+      data = JSON.parse(payload);
+      console.log('✅ JSON успешно распарсен');
+    } catch (parseError) {
+      console.error('❌ Ошибка парсинга JSON:', parseError.message);
+      console.error('Первые 500 символов payload:', payload?.substring(0, 500));
+      return res.status(400).json({
+        success: false,
+        error: 'Ошибка парсинга JSON',
+        message: parseError.message
+      });
+    }
+    
+    // Валидация наличия данных
+    console.log('🔍 Проверка наличия данных...');
     if (!data || Object.keys(data).length === 0) {
       console.error('❌ Данные не предоставлены или пусты');
       return res.status(400).json({
@@ -454,7 +455,9 @@ app.post('/webhook', async (req, res) => {
     // Если ошибка при парсинге JSON
     if (error instanceof SyntaxError) {
       console.error('❌ Ошибка парсинга JSON:', error.message);
-      console.error('Попытка распарсить:', payload?.substring(0, 200));
+      if (payload) {
+        console.error('Попытка распарсить:', payload.substring(0, 200));
+      }
     }
     
     // Логируем детали ошибки от amoCRM, если есть
