@@ -113,8 +113,16 @@ async function createOrUpdateContactInAmoCRM(data) {
   // Применяем маппинг для преобразования данных вебхука в поля amoCRM
   const contactFields = applyMapping(data, contactMapping);
   
+  // Валидация обязательных полей контакта
+  if (!contactFields.name) {
+    throw new Error('Не удалось создать название контакта. Проверьте данные вебхука.');
+  }
+  
   // Формируем данные для отправки в amoCRM
   const contactData = [contactFields];
+  
+  // Логируем данные перед отправкой (для отладки)
+  console.log('Данные контакта для отправки в amoCRM:', JSON.stringify(contactData, null, 2));
   
   try {
     const url = `${baseUrl}/api/v4/contacts`;
@@ -176,16 +184,54 @@ async function createLeadInAmoCRM(data, contactId) {
   // Применяем маппинг для преобразования данных вебхука в поля amoCRM
   const leadFields = applyMapping(data, leadMapping);
   
+  // Валидация обязательных полей
+  if (!leadFields.name) {
+    throw new Error('Не удалось создать название сделки. Проверьте данные вебхука.');
+  }
+  
+  if (!leadFields.pipeline_id) {
+    throw new Error('AMOCRM_PIPELINE_ID не установлен в переменных окружения. Это обязательное поле для создания сделки.');
+  }
+  
+  // Преобразуем pipeline_id и status_id в числа, если они строки
+  if (leadFields.pipeline_id) {
+    leadFields.pipeline_id = parseInt(leadFields.pipeline_id);
+    if (isNaN(leadFields.pipeline_id)) {
+      throw new Error(`Некорректный формат AMOCRM_PIPELINE_ID: "${process.env.AMOCRM_PIPELINE_ID}". Должно быть число.`);
+    }
+  }
+  
+  if (leadFields.status_id) {
+    leadFields.status_id = parseInt(leadFields.status_id);
+    if (isNaN(leadFields.status_id)) {
+      throw new Error(`Некорректный формат AMOCRM_STATUS_ID: "${process.env.AMOCRM_STATUS_ID}". Должно быть число.`);
+    }
+  }
+  
   // Добавляем связь с контактом, если он был создан
-  // Формат для amoCRM API v2: contacts_id должен быть массивом ID
+  // Формат для amoCRM API v4: используется _embedded.contacts с массивом объектов
   if (contactId) {
     // Преобразуем contactId в число, если это строка
     const contactIdNum = typeof contactId === 'string' ? parseInt(contactId) : contactId;
-    leadFields.contacts_id = [contactIdNum];
+    if (!isNaN(contactIdNum) && contactIdNum > 0) {
+      // Инициализируем _embedded, если его еще нет
+      if (!leadFields._embedded) {
+        leadFields._embedded = {};
+      }
+      leadFields._embedded.contacts = [
+        {
+          id: contactIdNum,
+          is_main: true  // Помечаем как основной контакт
+        }
+      ];
+    }
   }
   
   // Формируем данные для отправки в amoCRM (требуется массив)
   const leadData = [leadFields];
+  
+  // Логируем данные перед отправкой (для отладки)
+  console.log('Данные для отправки в amoCRM:', JSON.stringify(leadData, null, 2));
   
   try {
     const url = `${baseUrl}/api/v4/leads`;
@@ -315,20 +361,55 @@ app.post('/webhook', async (req, res) => {
       throw error; // Пробрасываем другие ошибки дальше
     }
   } catch (error) {
-    console.error('Ошибка при обработке запроса:', error);
+    console.error('Ошибка при обработке запроса:');
+    console.error('Тип ошибки:', error.constructor.name);
+    console.error('Сообщение:', error.message);
+    console.error('Stack:', error.stack);
+    
+    // Логируем детали ошибки от amoCRM, если есть
+    if (error.response) {
+      console.error('Статус ответа:', error.response.status);
+      console.error('Данные ответа:', JSON.stringify(error.response.data, null, 2));
+      console.error('Заголовки ответа:', error.response.headers);
+    }
     
     // Определяем статус код на основе типа ошибки
     let statusCode = 500;
+    let errorMessage = error.message || 'Внутренняя ошибка сервера';
+    
     if (error.message.includes('Invalid URL')) {
       statusCode = 400;
     } else if (error.message.includes('не установлен')) {
       statusCode = 500;
+    } else if (error.response) {
+      // Если есть ответ от API, используем его статус
+      statusCode = error.response.status || 500;
+      // Формируем понятное сообщение об ошибке
+      if (error.response.data) {
+        if (error.response.data.error) {
+          errorMessage = error.response.data.error;
+        } else if (error.response.data.detail) {
+          errorMessage = error.response.data.detail;
+        } else if (typeof error.response.data === 'string') {
+          errorMessage = error.response.data;
+        } else {
+          errorMessage = `Ошибка API: ${JSON.stringify(error.response.data)}`;
+        }
+      }
     }
     
     res.status(statusCode).json({
       success: false,
-      message: error.message || 'Внутренняя ошибка сервера',
-      error: error.message || 'Внутренняя ошибка сервера'
+      message: `Ошибка при отправке вебхука: ${errorMessage}`,
+      error: errorMessage,
+      statusCode: statusCode,
+      ...(process.env.NODE_ENV === 'development' && {
+        details: {
+          type: error.constructor.name,
+          stack: error.stack,
+          response: error.response?.data
+        }
+      })
     });
   }
 });
@@ -398,6 +479,52 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'sasha-webhook-to-amocrm'
+  });
+});
+
+/**
+ * Обработчик корневого пути
+ */
+app.get('/', (req, res) => {
+  res.json({
+    service: 'sasha-webhook-to-amocrm',
+    version: '1.0.0',
+    endpoints: {
+      webhook: 'POST /webhook - Прием вебхуков от Sasha AI',
+      test: 'POST /test/amocrm/lead - Тестовый endpoint для отправки сделки',
+      health: 'GET /health - Проверка работоспособности сервера'
+    },
+    message: 'Для отправки вебхуков используйте POST /webhook'
+  });
+});
+
+/**
+ * Обработчик для всех остальных несуществующих путей
+ */
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Endpoint не найден',
+    message: `Путь ${req.method} ${req.path} не существует`,
+    availableEndpoints: {
+      webhook: 'POST /webhook',
+      test: 'POST /test/amocrm/lead',
+      health: 'GET /health'
+    }
+  });
+});
+
+/**
+ * Глобальный обработчик ошибок
+ */
+app.use((err, req, res, next) => {
+  console.error('Глобальная ошибка:', err);
+  console.error('Stack:', err.stack);
+  
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Внутренняя ошибка сервера',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 });
 
